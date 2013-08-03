@@ -17,7 +17,7 @@
 #    along with periscope; if not, write to the Free Software
 #    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
-import os, struct, xmlrpclib, commands, gzip, traceback, logging
+import os, struct, xmlrpclib, commands, gzip, traceback, logging, re, ConfigParser
 import socket # For timeout purposes
 
 import SubtitleDatabase
@@ -85,16 +85,42 @@ class OpenSubtitles(SubtitleDatabase.SubtitleDB):
         super(OpenSubtitles, self).__init__(OS_LANGS)
         self.server_url = 'http://api.opensubtitles.org/xml-rpc'
         self.revertlangs = dict(map(lambda item: (item[1],item[0]), self.langs.items()))
+        self.tvshowRegex = re.compile('(?P<show>.*)S(?P<season>[0-9]{2})E(?P<episode>[0-9]{2}).(?P<data>[a-zA-Z0-9].*)-(?P<group>.*)', re.IGNORECASE)
+        try:
+            self.user = config.get("Opensubtitles","user")
+            self.password = config.get("Opensubtitles","pass")
+            self.tvshowhash = config.get("Opensubtitles","tvshowhash")            		
+			
+        except ConfigParser.NoSectionError:
+            config.add_section("Opensubtitles")
+            config.set("Opensubtitles", "user", "")
+            config.set("Opensubtitles", "pass", "")
+            config.set("Opensubtitles", "tvshowhash", "no")
+            config_file = os.path.join(cache_folder_path, "config")
+            configfile = open(config_file, "w")
+            config.write(configfile)
+            configfile.close()
+            pass
 
     def process(self, filepath, langs):
         ''' main method to call on the plugin, pass the filename and the wished 
         languages and it will query OpenSubtitles.org '''
         if os.path.isfile(filepath):
-            filehash = self.hashFile(filepath)
-            log.debug(filehash)
-            size = os.path.getsize(filepath)
-            fname = self.getFileName(filepath)
-            return self.query(moviehash=filehash, langs=langs, bytesize=size, filename=fname)
+            filename = self.getFileName(filepath)
+            matches_tvshow = self.tvshowRegex.match(filename)
+            if self.tvshowhash == "yes" and matches_tvshow :
+                log.debug(" Not using hash for tv-show")
+                (tvshow, season, episode, data, teams) = matches_tvshow.groups()	
+                tvshow = tvshow.replace(".", " ").strip()
+                tvshow = tvshow.replace("_", " ").strip()
+                return self.query(tvshow=tvshow, season=season, episode=episode, teams=teams, moviehash=None, langs=langs, bytesize=None, filename=filename)
+            else:
+                log.debug("Using hash")			
+                filehash = self.hashFile(filepath)
+                log.debug(filehash)
+                size = os.path.getsize(filepath)
+                fname = self.getFileName(filepath)
+                return self.query(tvshow=None, season=None, episode=None, teams=None, moviehash=filehash, langs=langs, bytesize=size, filename=fname)
         else:
             fname = self.getFileName(filepath)
             return self.query(langs=langs, filename=fname)
@@ -114,13 +140,16 @@ class OpenSubtitles(SubtitleDatabase.SubtitleDB):
         os.remove(srtbasefilename+".srt.gz")
         return srtbasefilename+".srt"
 
-    def query(self, filename, imdbID=None, moviehash=None, bytesize=None, langs=None):
+    def query(self, filename, imdbID=None, moviehash=None, bytesize=None, langs=None, tvshow=None, season=None, episode=None, teams=None):
         ''' Makes a query on opensubtitles and returns info about found subtitles.
             Note: if using moviehash, bytesize is required.    '''
         log.debug('query')
         #Prepare the search
         search = {}
         sublinks = []
+        if tvshow: search['query'] = tvshow
+        if season: search['season'] = season
+        if episode: search['episode'] = episode
         if moviehash: search['moviehash'] = moviehash
         if imdbID: search['imdbid'] = imdbID
         if bytesize: search['moviebytesize'] = str(bytesize)
@@ -135,8 +164,14 @@ class OpenSubtitles(SubtitleDatabase.SubtitleDB):
         #Login
         self.server = xmlrpclib.Server(self.server_url)
         socket.setdefaulttimeout(10)
+        if not self.user or self.password == "":
+            username = None
+            password = None
+        else :
+            username = self.user
+            password = self.password
         try:
-            log_result = self.server.LogIn("","","eng","periscope")
+            log_result = self.server.LogIn(username,password,"pob","periscope")
             log.debug(log_result)
             token = log_result["token"]
         except Exception:
@@ -150,7 +185,7 @@ class OpenSubtitles(SubtitleDatabase.SubtitleDB):
             
         # Search
         self.filename = filename #Used to order the results
-        sublinks += self.get_results(token, search)
+        sublinks += self.get_results(token, search, teams)
 
         # Logout
         try:
@@ -161,7 +196,7 @@ class OpenSubtitles(SubtitleDatabase.SubtitleDB):
         return sublinks
         
         
-    def get_results(self, token, search):
+    def get_results(self, token, search, teams):
         log.debug("query: token='%s', search='%s'" % (token, search))
         try:
             if search:
@@ -184,10 +219,14 @@ class OpenSubtitles(SubtitleDatabase.SubtitleDB):
                 result["page"] = r['SubDownloadLink']
                 result["lang"] = self.getLG(r['SubLanguageID'])
                 if search.has_key("query") : #We are using the guessed file name, let's remove some results
-                    if r["MovieReleaseName"].startswith(self.filename):
-                        sublinks.append(result)
-                    else:
-                        log.debug("Removing %s because release '%s' has not right start %s" %(result["release"], r["MovieReleaseName"], self.filename))
+                    matches_tvshow = self.tvshowRegex.match(r["MovieReleaseName"])
+                    if matches_tvshow: # It looks like a tv show
+                        (tvshow_r, season_r, episode_r, data_r, teams_r) = matches_tvshow.groups()
+                        if teams == teams_r :
+                            log.info("Release group is equal. Filename: " + teams + " Subtitle: " + teams_r )
+                            sublinks.append(result)
+                        else: 
+                            log.info("Release group is different. Filename: " + teams + " Subtitle: " + teams_r )
                 else :
                     sublinks.append(result)
         return sublinks
