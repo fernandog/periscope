@@ -16,14 +16,10 @@
 #     along with periscope; if not, write to the Free Software
 #     Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA    02110-1301    USA
 #
-#    Original version based on XBMC Legendas.tv plugin: 
-#    https://github.com/amet/script.xbmc.subtitles/blob/eden/script.xbmc.subtitles/resources/lib/services/LegendasTV/service.py
-#
+
 #    Initial version coded by Gastao Bandeira
 #    Bug fix and minor changes by Rafael Torres
-#    Improved search by Fernando G
-#    Working with new LegendasTV website by Fernando G.
-#    TO DO: improved search to include PACKs and double repisodes (S01E01E02) and multi episode inside .RAR (script get the first match and file match not always works)
+#    Improved search and new LegendasTV website by Fernando G
 
 import xml.dom.minidom
 import traceback
@@ -33,6 +29,7 @@ import zipfile
 import shutil
 import ConfigParser
 import random
+import socket
 
 import cookielib, urllib2, urllib, sys, re, os, webbrowser, time, unicodedata, logging, urlparse, requests
 from BeautifulSoup import BeautifulSoup, BeautifulStoneSoup
@@ -46,6 +43,7 @@ log = logging.getLogger(__name__)
 opener = ""
 cj = ""
 Logado = False
+naodisponivel = False
 
 class LegendasTV(SubtitleDatabase.SubtitleDB):
     url = "http://legendas.tv"
@@ -87,19 +85,23 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
             log.error("LegendasTV requires Unrar. Select the folder and executable of your unrar in your ~/.config/periscope/config file")
             return []
         self.LegendasTVLogin()
-        arquivo = self.getFileName(filepath)
-        dados = {}
-        dados = self.guessFileData(arquivo)
-        #log.debug(" Dados: " + str(dados))
-        if dados['type'] == 'tvshow':
-            subtitles = self.LegendasTVSeries(filepath,dados['name'], str(dados['season']), str(dados['episode']), str(dados['teams']), langs)
-            #log.debug(" Found " + str(len(subtitles)) + " results: " + str(subtitles))
-            #log.debug(" Subtitles: " + str(subtitles))
-        elif(dados['type'] == 'movie'):
-            subtitles =  self.LegendasTVMovies(filepath,dados['name'],dados['year'],langs)
+        if Logado == True and naodisponivel == False:
+            arquivo = self.getFileName(filepath)
+            dados = {}
+            dados = self.guessFileData(arquivo)
+            #log.debug(" Dados: " + str(dados))
+            if dados['type'] == 'tvshow':
+                subtitles = self.LegendasTVSeries(filepath,dados['name'], str(dados['season']), str(dados['episode']), str(dados['teams']), langs)
+                #log.debug(" Found " + str(len(subtitles)) + " results: " + str(subtitles))
+                #log.debug(" Subtitles: " + str(subtitles))
+            elif(dados['type'] == 'movie'):
+                subtitles =  self.LegendasTVMovies(filepath,dados['name'],dados['year'],langs)
+            else:
+                subtitles =  self.LegendasTVMovies(filepath,dados['name'],'',langs)
+            return subtitles
         else:
-            subtitles =  self.LegendasTVMovies(filepath,dados['name'],'',langs)
-        return subtitles
+            #log.debug("Nao logado")
+            return []
 
     def getFileName(self, filepath):
         filename = os.path.basename(filepath)
@@ -155,36 +157,44 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
 
     def LegendasTVLogin(self):
         '''Function for login on LegendasTV using username and password from config file'''
-        global opener, Logado
-        if not Logado:
+        global opener, Logado,naodisponivel
+        if Logado == False and naodisponivel == False:
             leg_url= self.url
             cj = cookielib.CookieJar()
             opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
             opener.addheaders = [('User-agent', ('Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.65 Safari/537.36'))]
-            #urllib2.install_opener(opener)
             login_data = urllib.urlencode({'data[User][username]':self.user,'data[User][password]':self.password})
             
             try:
-                #request = urllib2.Request(self.url+'/login',login_data)
-                #response = urllib2.urlopen(request,timeout=20).read()
-                response = opener.open(self.url+'/login',login_data,timeout=20).read()
+                response = opener.open(self.url+'/login',login_data,timeout=30).read()
                 #log.debug(" Tentando logar no LegendasTV")
+            except socket.timeout:
+                log.info(" Nao foi possivel pesquisar no LegendasTV - Timeout")
             except IOError, e:
-                if hasattr(e, 'code') and hasattr(e, 'reason'):
-                    log.info(" Nao foi possivel logar no LegendasTV. IOError Erro: " + str(e.code) + " " +str(e.reason))
+                if hasattr(e, 'code') and hasattr(e, 'reason') and e.code in (500,501,502,503,504,404):
+                    log.info(" LegendasTV nao disponivel. Nao foi possivel logar")
+                    naodisponivel = True
+                elif e.reason.message == 'timed out':
+                    log.info(" Nao foi possivel pesquisar no LegendasTV - Timeout")
+                else:
+                    log.info(" Nao foi possivel logar no LegendasTV. Mensagem: " + str(e.reason[1]))
+                Logado = False
             except:
-                log.info(" Nao foi possivel logar no LegendasTV. Erro desconhecido")                      
+                log.info(" Nao foi possivel pesquisar no LegendasTV.")
+                Logado = False
             else:
                 if response.__contains__('alert alert-error'):
                     log.error(" Senha ou usuario invalido")
+                    Logado = False
                 elif response.__contains__('An Internal Error Has Occurred'):
                     log.error(" Internal error")
-                elif response.__contains__(self.user):
-                    log.info(" Logado com sucesso")
+                    Logado = False
+                elif response.__contains__(">"+str(self.user)+"</a><span>"):
+                    log.info(" Logado com sucesso no LegendasTV!")
                     Logado = True
-                    #log.info(cj)
                 else:
-                    log.error(" Nao foi possivel logar no LegendasTV")                    
+                    log.error(" Nao foi possivel logar no LegendasTV") 
+                    Logado = False
     
 
     def createFile(self, subtitle):
@@ -217,7 +227,7 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
             except:
                 log.error("General error:" + str(sys.exc_info()[0]))
         else:
-            raise Exception("Unknown file format: " + fname)
+            log.error("Unknown file format: " + fname)
         
         extractedFiles.append(fname)    
 
@@ -230,63 +240,70 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
 
     def downloadFile(self, url, srtfilename):
         ''' Downloads the given url to the given filename '''
-        #self.LegendasTVLogin()
         subtitle = ""
         #Added the random number so two tvshow subtitles from the same season/episode but with releases/quality different can be downloaded
         extract_path = os.path.join(srtfilename.replace(self.getFileName(srtfilename),''), str(url)+"-"+str(random.randint(1, 99999)))
         #log.debug(" Path: " + str(extract_path))
         requests_log = logging.getLogger("requests")
         requests_log.setLevel(logging.WARNING)
+        ltv_sub = ""
         try:
             download_url = self.url + "/downloadarquivo/" + str(url)
-            #log.debug("Download URL: " + str(download_url))
-            #r = requests.get(download_url,timeout=20)
-            #ltv_sub = r.content
-            ltv_sub = opener.open(download_url,timeout=20).read()
+            ltv_sub = opener.open(download_url,timeout=30).read()
+        except socket.timeout:
+            log.info(" Nao foi possivel pesquisar no LegendasTV - Timeout")
+            return False
         except IOError, e:
-            if hasattr(e, 'code') and hasattr(e, 'reason'):
-                log.info(" Nao foi possivel fazer o download no LegendasTV. Erro: " + str(e.code) + " " +str(e.reason))
+            if hasattr(e, 'code') and hasattr(e, 'reason') and e.code in (500,501,502,503,504,404):
+                log.info(" LegendasTV nao disponivel. Nao foi possivel logar")
+                naodisponivel = True
+            elif e.reason.message == 'timed out':
+                log.info(" Nao foi possivel pesquisar no LegendasTV - Timeout")
+            else:
+                log.info(" Nao foi possivel logar no LegendasTV. Mensagem: " + str(e.reason[1]))
             return False
         except:
-            log.info(" Nao foi possivel fazer download no LegendasTV. Erro desconhecido")             
-            return False            
-            
-        os.makedirs(extract_path)
-        fname = os.path.join(extract_path,str(url))
-        fname += '.rar'
-        f = open(fname,'wb')
-        f.write(ltv_sub)
-        f.close()
-
-        self.extractFile(fname,extract_path)
-
-        legendas_tmp = []
-        fs_encoding = sys.getfilesystemencoding()
-        for root, dirs, files in os.walk(extract_path.encode(fs_encoding), topdown=False):
-            for file in files:
-                dirfile = os.path.join(root, file)
-                #log.debug("Diretorio: " + str(dirfile))
-                ext = os.path.splitext(dirfile)[1][1:].lower()
-                #log.debug(" file [%s] extension[%s]" % (file,ext))
-                if ext in self.sub_ext:
-                    log.info(" adicionando " + dirfile.replace('/media/SAMSUNG/Divx/8- Arquivos HDTV',''))
-                    legendas_tmp.append(dirfile)
-
-        if len(legendas_tmp) == 0:
-            log.info('Could not find any subtitle')
-            return False
-        
-        '''Verify the best subtitle in case of a pack for multiples releases'''
-        legenda_retorno = self.CompareSubtitle(srtfilename,legendas_tmp)
-        if legenda_retorno == '':
-            log.info(" Nenhuma legenda compativel")
-            shutil.rmtree(extract_path)
-            srtfilename = ''
-            return False
+            log.info(" Nao foi possivel pesquisar no LegendasTV.")
+            return False 
         else:
-            #log.debug(" Renaming [%s] to [%s] " % (os.path.join(extract_path,legenda_retorno),srtfilename))
-            shutil.move(os.path.join(extract_path,legenda_retorno),srtfilename)
-            shutil.rmtree(extract_path)        
+            os.makedirs(extract_path)
+            fname = os.path.join(extract_path,str(url))
+            fname += '.rar'
+            f = open(fname,'wb')
+            f.write(ltv_sub)
+            f.close()
+            
+            self.extractFile(fname,extract_path)
+            
+            legendas_tmp = []
+            fs_encoding = sys.getfilesystemencoding()
+            for root, dirs, files in os.walk(extract_path.encode(fs_encoding), topdown=False):
+                for file in files:
+                    dirfile = os.path.join(root, file)
+                    #log.debug("Diretorio: " + str(dirfile))
+                    ext = os.path.splitext(dirfile)[1][1:].lower()
+                    #log.debug(" file [%s] extension[%s]" % (file,ext))
+                    if ext in self.sub_ext:
+                        log.debug(" adicionando " + os.path.basename(dirfile))
+                        legendas_tmp.append(dirfile)
+            
+            if len(legendas_tmp) == 0:
+                log.info(' Nenhuma legenda descompactada')
+                return False
+            else:
+                log.debug(' Legenda baixada e descompactada')
+            
+            '''Verify the best subtitle in case of a pack for multiples releases'''
+            legenda_retorno = self.CompareSubtitle(srtfilename,legendas_tmp)
+            if legenda_retorno == '':
+                log.info(" Nenhuma legenda compativel")
+                shutil.rmtree(extract_path)
+                srtfilename = ''
+                return False
+            else:
+                #log.debug(" Renaming [%s] to [%s] " % (os.path.join(extract_path,legenda_retorno),srtfilename))
+                shutil.move(os.path.join(extract_path,legenda_retorno),srtfilename)
+                shutil.rmtree(extract_path)        
 
     def CompareSubtitle(self,releaseFile,subtitleList):
         '''Verify the best subtitle in case of a pack for multiples releases'''
@@ -352,8 +369,9 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                             #FirstMatch = Team and resolution must be equal
                             if resolutionvideo.lower() == '1080p':
                                 #FirstMatch = Team different and resolution equal (1080p cases)
-                                FirstMatch = self.getFileName(subtitle)
-                                log.info(" Resolucao: Sim e Equipe: Nao (1080p Promovido!) - " + str(self.getFileName(subtitle)))
+                                #FirstMatch = self.getFileName(subtitle)
+                                #There is the new 1080p.HDTV. Can promote anymore
+                                log.info(" Resolucao: Sim e Equipe: Nao (1080p Nao Promovido!) - " + str(self.getFileName(subtitle)))
                             else:
                                 log.info(" Resolucao: Sim e Equipe: Nao - " + str(self.getFileName(subtitle)))
                         else:
@@ -391,21 +409,18 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                 langCode = 'portugues-pt'
             if langs[0] == 'es':
                 langCode = 'espanhol'
-            
-       
+
         search = title.lower() + ' ' + year
         search_url = self.url +'/util/carrega_legendas_busca/' +search.replace(' ','%20')+ '/1'
         #log.debug(" Search URL: " + str(search_url))
-        ##log.debug(search)
+        #log.debug(search)
         try:
-            #request = urllib2.Request(search_url)
-            response = opener.open(search_url,timeout=20).read()
+            response = opener.open(search_url,timeout=30).read()
             result = response.lower()
             soup = BeautifulSoup(result)        
             qtdlegendas = result.count('span class="number number_')
             
             if qtdlegendas > 0:
-            
                 result =[]
                 #log.debug(" Resultado da busca: " + str(qtdlegendas) + " legenda(s)")
                 # Legenda com destaque    
@@ -419,8 +434,7 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                     #log.debug(entry)                
                     if  langCode == self.Uconvert(lang):
                         result.append(entry)
-    
-            
+
                 # Legenda sem destaque
                 for html in soup.findAll("div",{"class":""}):
                     a = html.find("a")
@@ -432,13 +446,12 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                     #log.debug(entry)
                     if  langCode == self.Uconvert(lang):
                         result.append(entry)
-                    
-                    
+
                 qtd = len(result)    
                 if qtd > 0:
                     for legendas in result:
-                        ##log.debug(legendas["Name"])
-                        ##log.debug(title.lower() + ' ' + year)                        
+                        #log.debug(legendas["Name"])
+                        #log.debug(title.lower() + ' ' + year)                        
                         if legendas["Name"].find(title.lower() + ' ' + year) >= 0 or legendas["Name"].find(title.lower()) >= 0 or legendas["Name"].find(title.lower().replace(' ','.') + ' ' + year) >= 0 or legendas["Name"].find(title.lower().replace(' ','.')) >= 0:
                             link = legendas["Link"]
                             regex = re.compile(self.url + '/download/(?P<id>[0-9a-zA-Z].*)/(?P<movie>.*)/(?P<movie2>.*)')
@@ -459,13 +472,16 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                     log.debug(" Nao houve resultados para a busca desse episodio")
             else:
                 log.debug(" Nao houve resultados para a busca desse episodio")
-            
+        except socket.timeout:
+            log.info(" Nao foi possivel pesquisar no LegendasTV - Timeout")
         except IOError, e:
-            if hasattr(e, 'code') and hasattr(e, 'reason'):
-                log.info(" Nao foi possivel pesquisar no LegendasTV. Erro: " + str(e.code) + " " +str(e.reason))
-        except:
-            log.info(" Nao foi possivel pesquisar no LegendasTV. Erro desconhecido")                 
-        
+            if hasattr(e, 'code') and hasattr(e, 'reason') and e.code in (500,501,502,503,504,404):
+                log.info(" LegendasTV nao disponivel. Nao foi possivel logar")
+                naodisponivel = True
+            elif e.reason.message == 'timed out':
+                log.info(" Nao foi possivel pesquisar no LegendasTV - Timeout")
+            else:
+                log.info(" Nao foi possivel logar no LegendasTV. Mensagem: " + str(e.reason[1]))
         return sub1
         
     def LegendasTVSeries(self,file_original_path,tvshow, season, episode, teams, langs):
@@ -515,15 +531,14 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
         search_url = self.url +'/util/carrega_legendas_busca/' +search.replace(' ','%20')+ '/1'
         #log.debug(" Search URL (0): " + str(search_url))
         try:
-            #request = urllib2.Request(search_url)
-            response = opener.open(search_url,timeout=20).read()
+            response = opener.open(search_url,timeout=30).read()
             result = response.lower()
             
             soup = BeautifulSoup(result)        
             qtdlegendas = result.count('span class="number number_')
-            ##log.debug(qtdlegendas)      
+            #log.debug(qtdlegendas)      
 
-            #f = open('/media/SAMSUNG/Divx/8- Arquivos HDTV/result.html', 'w')
+            #f = open(result_page.html', 'w')
             #f.write(result)
             #f.close()
 
@@ -532,53 +547,76 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                 search_url = self.url +'/util/carrega_legendas_busca/' +search.replace(' ','%20')+ '/1'
                 #log.debug(" Search URL (1): " + str(search_url))
                 try:
-                    #request = urllib2.Request(search_url)
-                    response = opener.open(search_url,timeout=20).read()
+                    response = opener.open(search_url,timeout=30).read()
                     result = response.lower()
-                    
                     soup = BeautifulSoup(result)        
                     qtdlegendas = result.count('span class="number number_')
+                except socket.timeout:
+                    log.info(" Nao foi possivel pesquisar no LegendasTV - Timeout")
+                    return sub1
                 except IOError, e:
-                    if hasattr(e, 'code') and hasattr(e, 'reason'):
-                        log.info(" Nao foi possivel pesquisar no LegendasTV. Erro: " + str(e.code) + " " +str(e.reason))
-                except e:
-                    log.info(e)
-                    log.info(" Nao foi possivel pesquisar no LegendasTV. Erro desconhecido")                          
+                    if hasattr(e, 'code') and hasattr(e, 'reason') and e.code in (500,501,502,503,504,404):
+                        log.info(" LegendasTV nao disponivel. Nao foi possivel logar")
+                        naodisponivel = True
+                    elif e.reason.message == 'timed out':
+                        log.info(" Nao foi possivel pesquisar no LegendasTV - Timeout")
+                    else:
+                        log.info(" Nao foi possivel logar no LegendasTV. Mensagem: " + str(e.reason[1]))
+                    return sub1
+                except:
+                    log.info(" Nao foi possivel pesquisar no LegendasTV.")
+                    return sub1
 
             if qtdlegendas <= 0:
                 search = self.RemoveYear(tvshow) + ' ' + 'S' + ss +'E' + eea +'E' + ee
                 search_url = self.url +'/util/carrega_legendas_busca/' +search.replace(' ','%20')+ '/1'
                 #log.debug(" Search URL (2): " + str(search_url))
                 try:
-                    #request = urllib2.Request(search_url)
-                    response = opener.open(search_url,timeout=20).read()
+                    response = opener.open(search_url,timeout=30).read()
                     result = response.lower()
-                    
                     soup = BeautifulSoup(result)        
                     qtdlegendas = result.count('span class="number number_')
+                except socket.timeout:
+                    log.info(" Nao foi possivel pesquisar no LegendasTV - Timeout")
+                    return sub1
                 except IOError, e:
-                    if hasattr(e, 'code') and hasattr(e, 'reason'):
-                        log.info(" Nao foi possivel pesquisar no LegendasTV. Erro: " + str(e.code) + " " +str(e.reason))
-                except:
-                    log.info(" Nao foi possivel pesquisar no LegendasTV. Erro desconhecido")
+                    if hasattr(e, 'code') and hasattr(e, 'reason') and e.code in (500,501,502,503,504,404):
+                        log.info(" LegendasTV nao disponivel. Nao foi possivel logar")
+                        naodisponivel = True
+                    elif e.reason.message == 'timed out':
+                        log.info(" Nao foi possivel pesquisar no LegendasTV - Timeout")
+                    else:
+                        log.info(" Nao foi possivel logar no LegendasTV. Mensagem: " + str(e.reason[1])) 
+                    return sub1
+                except e:
+                    log.info(" Nao foi possivel pesquisar no LegendasTV - " + str(e.reason[1])) 
+                    return sub1
 
             if qtdlegendas <= 0:
                 search = tvshow.replace("."," ").replace("_", " ") + ' ' + season +'x' + ee
                 search_url = self.url +'/util/carrega_legendas_busca/' +search.replace(' ','%20')+ '/1'
                 #log.debug(" Search URL (3): " + str(search_url))
                 try:
-                    #request = urllib2.Request(search_url)
-                    response = opener.open(search_url,timeout=20).read()
+                    response = opener.open(search_url,timeout=30).read()
                     result = response.lower()
-                    
                     soup = BeautifulSoup(result)        
                     qtdlegendas = result.count('span class="number number_')
+                except socket.timeout:
+                    log.info(" Nao foi possivel pesquisar no LegendasTV - Timeout")
+                    return sub1
                 except IOError, e:
-                    if hasattr(e, 'code') and hasattr(e, 'reason'):
-                        log.info(" Nao foi possivel pesquisar no LegendasTV. Erro: " + str(e.code) + " " +str(e.reason))
+                    if hasattr(e, 'code') and hasattr(e, 'reason') and e.code in (500,501,502,503,504,404):
+                        log.info(" LegendasTV nao disponivel. Nao foi possivel logar")
+                        naodisponivel = True
+                    elif e.reason.message == 'timed out':
+                        log.info(" Nao foi possivel pesquisar no LegendasTV - Timeout")
+                    else:
+                        log.info(" Nao foi possivel logar no LegendasTV. Mensagem: " + str(e.reason[1])) 
+                    return sub1
                 except:
-                    log.info(" Nao foi possivel pesquisar no LegendasTV. Erro desconhecido")                      
-                    
+                    log.info(" Nao foi possivel pesquisar no LegendasTV.")
+                    return sub1
+
             if qtdlegendas > 0:
             
                 result =[]
@@ -661,16 +699,21 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                 else:
                     log.debug(" Nao houve resultados para a busca desse episodio")
             else:
-                log.debug(" Nao houve resultados para a busca desse episodio")        
-            
+                log.debug(" Nao houve resultados para a busca desse episodio")
+        except socket.timeout:
+            log.info(" Nao foi possivel pesquisar no LegendasTV - Timeout")
         except IOError, e:
-            if hasattr(e, 'code') and hasattr(e, 'reason'):
-                log.info(" Nao foi possivel pesquisar no LegendasTV. Erro: " + str(e.code) + " " +str(e.reason))
+            if hasattr(e, 'code') and hasattr(e, 'reason') and e.code in (500,501,502,503,504,404):
+                log.info(" LegendasTV nao disponivel. Nao foi possivel logar")
+                naodisponivel = True
+            elif e.reason.message == 'timed out':
+                log.info(" Nao foi possivel pesquisar no LegendasTV - Timeout")
             else:
-                log.info(" Nao foi possivel pesquisar no LegendasTV. Erro: ")
-        except Exception, err:
-            print Exception, err        
-            log.info(" Nao foi possivel pesquisar no LegendasTV. Erro desconhecido")                           
+                log.info(" Nao foi possivel logar no LegendasTV. Mensagem: " + str(e.reason[1]))
+        except:
+            log.info(" Nao foi possivel pesquisar no LegendasTV.")            
+        #except:
+         #   log.info(" Nao foi possivel pesquisar no LegendasTV. Exception")
         return sub1
 
     def chomp(self,s):
