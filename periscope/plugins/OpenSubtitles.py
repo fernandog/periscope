@@ -322,16 +322,18 @@ class OpenSubtitles(SubtitleDatabase.SubtitleDB):
                             else: 
                                 log.info(" Group dont match. Filename: " + teams + " Subtitle: " + teams_r )							
                         else:  # It looks like a tv-show, but didnt matched using REGEX
-                            log.debug("Tv-show Didnt matched using REGEX");
+                            log.debug(" Tv-show Didnt matched using REGEX");
+                            log.debug(" MovieReleaseName: " + r["MovieReleaseName"].lower())
+                            log.debug(" Subtitle filename: " + r['SubFileName'])
                             #log.debug(r["MovieReleaseName"].lower() + ' s'+season+'e'+episode)
                             if r["MovieReleaseName"].lower().find(teams.lower()) >= 0 and r['UserNickName'] in ("noriegaRJ","AlbustigriS") and r["MovieReleaseName"].lower().find('s'+season+'e'+episode) > 0 :	
                                 log.info(" Tv-show release has group on it. Release: " + r["MovieReleaseName"] + " User: " + r['UserNickName'])
                                 sublinks.append(result)
-                            elif dados.lower().find("web-dl") >= 0 and r["MovieReleaseName"].lower().find("web-dl") >= 0 and r['UserNickName'] in ("noriegaRJ","AlbustigriS") and r["MovieReleaseName"].lower().find('s'+season+'e'+episode) > 0 :	
+                            elif dados.lower().find("web-dl") >= 0 and r["MovieReleaseName"].lower().find("web-dl") >= 0 and r['UserNickName'] in ("noriegaRJ","AlbustigriS") and r['SubFileName'].lower().find('s'+season+'e'+episode) > 0 :	
                                 log.info(" Tv-show release has WEB-DL on it. Release: " + r["MovieReleaseName"] + " User: " + r['UserNickName'])
                                 sublinks.append(result)							
                             else:							
-                                log.info("Tv-show release didnt matched. Release: "  + r["MovieReleaseName"])
+                                log.info(" Tv-show release didnt matched. Release: "  + r["MovieReleaseName"])
                 else :
                     sublinks.append(result)
         return sublinks

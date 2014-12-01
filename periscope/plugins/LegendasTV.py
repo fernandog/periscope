@@ -37,11 +37,15 @@ import random
 import cookielib, urllib2, urllib, sys, re, os, webbrowser, time, unicodedata, logging, urlparse, requests
 from BeautifulSoup import BeautifulSoup, BeautifulStoneSoup
 from htmlentitydefs import name2codepoint as n2cp
+from datetime import date
 
 import SubtitleDatabase
 import subprocess
 
 log = logging.getLogger(__name__)
+opener = ""
+cj = ""
+Logado = False
 
 class LegendasTV(SubtitleDatabase.SubtitleDB):
     url = "http://legendas.tv"
@@ -79,20 +83,18 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
         if not self.user or self.user == "":
             log.error("LegendasTV requires a personnal username/password. Set one up in your ~/.config/periscope/config file")
             return []
-        if not self.unrar or self.unrar == "":
+        if not self.unrar or self.unrar == "" or not os.path.isfile(self.unrar):
             log.error("LegendasTV requires Unrar. Select the folder and executable of your unrar in your ~/.config/periscope/config file")
-            if not os.path.exists(self.unrar):
-                log.error("LegendasTV requires Unrar. Check if unrar exists in the folder set in ~/.config/periscope/config file")
-                return []
-            return []			
+            return []
+        self.LegendasTVLogin()
         arquivo = self.getFileName(filepath)
         dados = {}
         dados = self.guessFileData(arquivo)
-        log.debug(" Dados: " + str(dados))
+        #log.debug(" Dados: " + str(dados))
         if dados['type'] == 'tvshow':
             subtitles = self.LegendasTVSeries(filepath,dados['name'], str(dados['season']), str(dados['episode']), str(dados['teams']), langs)
-            log.debug(" Found " + str(len(subtitles)) + " results: " + str(subtitles))
-            log.debug(" Subtitles: " + str(subtitles))
+            #log.debug(" Found " + str(len(subtitles)) + " results: " + str(subtitles))
+            #log.debug(" Subtitles: " + str(subtitles))
         elif(dados['type'] == 'movie'):
             subtitles =  self.LegendasTVMovies(filepath,dados['name'],dados['year'],langs)
         else:
@@ -108,11 +110,11 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
         return fname
 
     def guessFileData(self, filename):
-        filename = unicode(self.getFileName(filename).lower()).replace("web-dl","webdl").replace("web.dl","webdl").replace("web dl","webdl")
-        log.debug(filename)
+        filename = unicode(self.getFileName(self.Uconvert(filename)).lower()).replace("web-dl","webdl").replace("web.dl","webdl").replace("web dl","webdl")
+        #log.debug(filename)
         matches_tvshow = self.tvshowRegex.match(filename)
         if matches_tvshow: # It looks like a tv show
-            log.debug(" Using Regex1")
+            #log.debug(" Using Regex1")
             (tvshow, season, episode, teams) = matches_tvshow.groups()
             tvshow = tvshow.replace(".", " ").strip()
             tvshow = tvshow.replace("_", " ").strip()
@@ -123,7 +125,7 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
         else:
             matches_tvshow = self.tvshowRegex2.match(filename)
             if matches_tvshow:
-                log.debug(" Using Regex2")			
+                #log.debug(" Using Regex2")            
                 (tvshow, season, episode, teams) = matches_tvshow.groups()
                 tvshow = tvshow.replace(".", " ").strip()
                 tvshow = tvshow.replace("_", " ").strip()
@@ -151,30 +153,39 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                 else:
                     return {'type' : 'unknown', 'name' : filename, 'teams' : [] }
 
-
     def LegendasTVLogin(self):
         '''Function for login on LegendasTV using username and password from config file'''
-        leg_url= self.url
-        cj = cookielib.MozillaCookieJar()
-        opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
-        opener.addheaders = [('User-agent', ('Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.2; .NET CLR 1.1.4322)'))]
-        urllib2.install_opener(opener)
-        login_data = urllib.urlencode({'data[User][username]':self.user,'data[User][password]':self.password})
-		
-        try:
-            request = urllib2.Request(self.url+'/login',login_data)
-            response = urllib2.urlopen(request,timeout=20).read()
-        except IOError, e:
-            if hasattr(e, 'code') and hasattr(e, 'reason'):
-                log.info(" Nao foi possivel logar no LegendasTV. Erro: " + str(e.code) + " " +str(e.reason))
-        else:
-	        if response.__contains__('alert alert-error'):
-		        log.error(" Wrong user / can not login")
-	        elif response.__contains__('An Internal Error Has Occurred'):
-		        log.error(" Internal error")
-	        else:
-		        log.debug(" Logged with success")					
-	
+        global opener, Logado
+        if not Logado:
+            leg_url= self.url
+            cj = cookielib.CookieJar()
+            opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
+            opener.addheaders = [('User-agent', ('Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.65 Safari/537.36'))]
+            #urllib2.install_opener(opener)
+            login_data = urllib.urlencode({'data[User][username]':self.user,'data[User][password]':self.password})
+            
+            try:
+                #request = urllib2.Request(self.url+'/login',login_data)
+                #response = urllib2.urlopen(request,timeout=20).read()
+                response = opener.open(self.url+'/login',login_data,timeout=20).read()
+                #log.debug(" Tentando logar no LegendasTV")
+            except IOError, e:
+                if hasattr(e, 'code') and hasattr(e, 'reason'):
+                    log.info(" Nao foi possivel logar no LegendasTV. IOError Erro: " + str(e.code) + " " +str(e.reason))
+            except:
+                log.info(" Nao foi possivel logar no LegendasTV. Erro desconhecido")                      
+            else:
+                if response.__contains__('alert alert-error'):
+                    log.error(" Senha ou usuario invalido")
+                elif response.__contains__('An Internal Error Has Occurred'):
+                    log.error(" Internal error")
+                elif response.__contains__(self.user):
+                    log.info(" Logado com sucesso")
+                    Logado = True
+                    #log.info(cj)
+                else:
+                    log.error(" Nao foi possivel logar no LegendasTV")                    
+    
 
     def createFile(self, subtitle):
         '''pass the ID of the sub and the file it matches, will unzip it
@@ -192,14 +203,14 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
         if fname in extractedFiles:
             return
         if zipfile.is_zipfile(fname):
-            log.debug(" Unzipping file " + fname)
+            #log.debug(" Unzipping file " + fname)
             zf = zipfile.ZipFile(fname, "r")
             zf.extractall(extract_path)
             zf.close()
         elif fname.endswith('.rar'):
             try:
                 '''Try to use unrar from folder in config file'''
-                log.debug(" Extracting file " + fname)
+                #log.debug(" Extracting file " + fname)
                 subprocess.call([self.unrar, 'e','-y','-inul',fname, extract_path])
             except OSError as e:
                 log.error("OSError [%d]: %s at %s" % (e.errno, e.strerror, e.filename))
@@ -219,20 +230,27 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
 
     def downloadFile(self, url, srtfilename):
         ''' Downloads the given url to the given filename '''
+        #self.LegendasTVLogin()
         subtitle = ""
-		#Added the random number so two tvshow files from the same season/episode but with releases/quality different can be downloaded
+        #Added the random number so two tvshow subtitles from the same season/episode but with releases/quality different can be downloaded
         extract_path = os.path.join(srtfilename.replace(self.getFileName(srtfilename),''), str(url)+"-"+str(random.randint(1, 99999)))
-        log.debug(" Path: " + str(extract_path))
+        #log.debug(" Path: " + str(extract_path))
         requests_log = logging.getLogger("requests")
-        requests_log.setLevel(logging.WARNING)		
+        requests_log.setLevel(logging.WARNING)
         try:
-			r = requests.get(self.url + "/pages/downloadarquivo/" + str(url),timeout=20)
-			ltv_sub = r.content				
+            download_url = self.url + "/downloadarquivo/" + str(url)
+            #log.debug("Download URL: " + str(download_url))
+            #r = requests.get(download_url,timeout=20)
+            #ltv_sub = r.content
+            ltv_sub = opener.open(download_url,timeout=20).read()
         except IOError, e:
             if hasattr(e, 'code') and hasattr(e, 'reason'):
                 log.info(" Nao foi possivel fazer o download no LegendasTV. Erro: " + str(e.code) + " " +str(e.reason))
             return False
-
+        except:
+            log.info(" Nao foi possivel fazer download no LegendasTV. Erro desconhecido")             
+            return False            
+            
         os.makedirs(extract_path)
         fname = os.path.join(extract_path,str(url))
         fname += '.rar'
@@ -247,15 +265,16 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
         for root, dirs, files in os.walk(extract_path.encode(fs_encoding), topdown=False):
             for file in files:
                 dirfile = os.path.join(root, file)
+                #log.debug("Diretorio: " + str(dirfile))
                 ext = os.path.splitext(dirfile)[1][1:].lower()
-                log.debug(" file [%s] extension[%s]" % (file,ext))
+                #log.debug(" file [%s] extension[%s]" % (file,ext))
                 if ext in self.sub_ext:
-                    log.debug(" adding " + dirfile)
+                    log.info(" adicionando " + dirfile.replace('/media/SAMSUNG/Divx/8- Arquivos HDTV',''))
                     legendas_tmp.append(dirfile)
 
         if len(legendas_tmp) == 0:
-            shutil.rmtree(extract_path)
-            raise Exception('Could not find any subtitle')
+            log.info('Could not find any subtitle')
+            return False
         
         '''Verify the best subtitle in case of a pack for multiples releases'''
         legenda_retorno = self.CompareSubtitle(srtfilename,legendas_tmp)
@@ -265,103 +284,103 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
             srtfilename = ''
             return False
         else:
-            log.debug(" Renaming [%s] to [%s] " % (os.path.join(extract_path,legenda_retorno),srtfilename))
+            #log.debug(" Renaming [%s] to [%s] " % (os.path.join(extract_path,legenda_retorno),srtfilename))
             shutil.move(os.path.join(extract_path,legenda_retorno),srtfilename)
-            shutil.rmtree(extract_path)		
+            shutil.rmtree(extract_path)        
 
     def CompareSubtitle(self,releaseFile,subtitleList):
         '''Verify the best subtitle in case of a pack for multiples releases'''
         nameSplit = releaseFile.rsplit(".", 1)[0].replace('.',' ').replace('_',' ').replace('-',' ').replace("'", "").split()
-        log.debug(nameSplit)
+        #log.debug(nameSplit)
         releasevideo = nameSplit[-1]
         resolutionvideo = ''
         if any("hdtv" in s for s in nameSplit):
             resolutionvideo = "HDTV"
         if any("HDTV" in s for s in nameSplit):
-            resolutionvideo = "HDTV"			
+            resolutionvideo = "HDTV"            
         if any("webrip" in s for s in nameSplit):
-            resolutionvideo = "WEBRip"			
+            resolutionvideo = "WEBRip"            
         if any("WEBRip" in s for s in nameSplit):
-            resolutionvideo = "WEBRip"				
+            resolutionvideo = "WEBRip"                
         if any("720p" in s for s in nameSplit):
             resolutionvideo = "720p"
         if any("1080p" in s for s in nameSplit):
             resolutionvideo = "1080p" 
-        log.debug(" Looking for subtitle: " + str(self.getFileName(releaseFile).rsplit(".", 1)[0]) + " (Resolution: "+ str(resolutionvideo) + " and  Team: " + str(releasevideo) + ")")
+        #log.debug(" Procurando legenda: " + str(self.getFileName(releaseFile).rsplit(".", 1)[0]) + " (Resolucao: "+ str(resolutionvideo) + " e Equipe: " + str(releasevideo) + ")")
         bestMatch = ''
         FirstMatch = ''
         SecondMatch = ''
-        FileMatch = ''		
+        FileMatch = ''        
         MatchMode = ''
         for subtitle in subtitleList:
-            nameSplitTemp = self.getFileName(subtitle).rsplit(".", 1)[0].replace('.',' ').replace('_',' ').replace('-',' ').replace("'", "").split()
+            nameSplitTemp = self.getFileName(subtitle).rsplit(".", 1)[0].replace(" BR-PORT","").replace('.',' ').replace('_',' ').replace('-',' ').replace("'", "").split()
             log.debug(nameSplitTemp)
             releasesrt = nameSplitTemp[-1]
             resolutionsrt = ''
             if any("hdtv" in s for s in nameSplitTemp):
                 resolutionsrt = "HDTV"
             if any("HDTV" in s for s in nameSplitTemp):
-                resolutionsrt = "HDTV"				
+                resolutionsrt = "HDTV"                
             if any("webrip" in s for s in nameSplitTemp):
-                resolutionsrt = "WEBRip"				
+                resolutionsrt = "WEBRip"                
             if any("WEBRip" in s for s in nameSplitTemp):
-                resolutionsrt = "WEBRip"				
+                resolutionsrt = "WEBRip"                
             if any("420p" in s for s in nameSplitTemp):
-                resolutionsrt = "420p"				
+                resolutionsrt = "420p"                
             if any("720p" in s for s in nameSplitTemp):
                 resolutionsrt = "720p"
             if any("1080p" in s for s in nameSplitTemp):
                 resolutionsrt = "1080p"
             if self.getFileName(releaseFile).rsplit(".", 1)[0].lower() == self.getFileName(subtitle).rsplit(".", 1)[0].lower().replace("web.dl","web-dl").replace("web dl","web-dl"):
-                log.debug(" File matched: " + str(self.getFileName(subtitle).rsplit(".", 1)[0]))
+                #log.debug(" Arquivo exato: " + str(self.getFileName(subtitle).rsplit(".", 1)[0]))
                 FileMatch = str(self.getFileName(subtitle))
             else:
                 # If matched using filename, dont match by Team and Resolution
-                if len(FileMatch) < 1:			
+                if len(FileMatch) < 1:            
                     if releasevideo.lower() == releasesrt.lower():
-                        if resolutionvideo.lower() == resolutionsrt.lower():	
-                            #FirstMatch = Team AND resolution must be equal
-                            log.info(" Resolution: Yes and Team: Yes - " + str(self.getFileName(subtitle)))
+                        if resolutionvideo.lower() == resolutionsrt.lower():    
+                            #FirstMatch = Team and resolution must be equal
+                            log.info(" Resolucao: Sim e Equipe: Sim - " + str(self.getFileName(subtitle)))
                             FirstMatch = self.getFileName(subtitle)
                         else:
-                            #SecondMatch = only team must be equal (some WEB-DL are postest only with resolution 720p )			
-                            log.info(" Resolution: No and Team: Yes - " + str(self.getFileName(subtitle)))
+                            #SecondMatch = only team must be equal (some WEB-DL are postest only with resolution 720p )            
+                            log.info(" Resolucao: Nao e Equipe: Sim - " + str(self.getFileName(subtitle)))
                             SecondMatch = self.getFileName(subtitle)
                     else:
-                        log.debug( "Team not matched: " + str(self.getFileName(subtitle)))
-                        if resolutionvideo.lower() == resolutionsrt.lower():	
-                            #FirstMatch = Team AND resolution must be equal
+                        #log.debug( "Team not matched: " + str(self.getFileName(subtitle)))
+                        if resolutionvideo.lower() == resolutionsrt.lower():    
+                            #FirstMatch = Team and resolution must be equal
                             if resolutionvideo.lower() == '1080p':
                                 #FirstMatch = Team different and resolution equal (1080p cases)
                                 FirstMatch = self.getFileName(subtitle)
-                                log.info(" Resolution: Yes and Team: No (1080p Promoted!) - " + str(self.getFileName(subtitle)))
+                                log.info(" Resolucao: Sim e Equipe: Nao (1080p Promovido!) - " + str(self.getFileName(subtitle)))
                             else:
-                                log.info(" Resolution: Yes and Team: No - " + str(self.getFileName(subtitle)))
+                                log.info(" Resolucao: Sim e Equipe: Nao - " + str(self.getFileName(subtitle)))
                         else:
                             # Team and Resolution different
-                            log.info(" Resolution: No and Team: No - " + str(self.getFileName(subtitle)))
-        if len(FileMatch)+len(FirstMatch)+len(SecondMatch) > 1:
-            log.debug( "FileMatch: " + str(FileMatch) + " FirstMatch: " + str(FirstMatch) + " SecondMatch: " + str(SecondMatch)) 
+                            log.info(" Resolucao: Nao e Equipe: Nao - " + str(self.getFileName(subtitle)))
+        #if len(FileMatch)+len(FirstMatch)+len(SecondMatch) > 1:
+            #log.debug( "FileMatch: " + str(FileMatch) + " FirstMatch: " + str(FirstMatch) + " SecondMatch: " + str(SecondMatch)) 
         if len(FileMatch) > 1:  
-			bestMatch = FileMatch		
-			MatchMode = "File"
+            bestMatch = FileMatch        
+            MatchMode = "File"
         else:
-			if len(FirstMatch) > 1:
-		 		bestMatch = FirstMatch
-		 		MatchMode = "Team + Resolution"
-			else:	
-		 		bestMatch = SecondMatch	
-		 		MatchMode = "Team (resolution promoted)"
-        if len(bestMatch) > 1:	
-			log.info(" ***** Match mode: " + str(MatchMode)  + ". Subtitle file choosen: " + str(bestMatch) + "*****")			
+            if len(FirstMatch) > 1:
+                 bestMatch = FirstMatch
+                 MatchMode = "Equipe + Resolucao"
+            else:    
+                 bestMatch = SecondMatch    
+                 MatchMode = "Equipe (resolucao promovida)"
+        if len(bestMatch) > 1:    
+            log.info(" ***** Arquivo exato: " + str(bestMatch) + " *****")            
         return bestMatch
 
     def LegendasTVMovies(self, file_original_path, title, year, langs):
-
+    
         # Initiating variables and languages.
         subtitles, sub1 = [], []
-	
-        log.debug(' movie')
+    
+        #log.debug(' movie')
 
         if len(langs) > 1:
             langCode = '99'
@@ -375,21 +394,21 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
             
        
         search = title.lower() + ' ' + year
-        search_url = self.url +'/util/carrega_legendas_busca/termo:' +search.replace(' ','%20') + '/id_idioma:1'
-        log.debug(" Search URL: " + str(search_url))
-        #log.debug(search)
+        search_url = self.url +'/util/carrega_legendas_busca/' +search.replace(' ','%20')+ '/1'
+        #log.debug(" Search URL: " + str(search_url))
+        ##log.debug(search)
         try:
-            request = urllib2.Request(search_url)
-            response = urllib2.urlopen(request,timeout=20).read()
+            #request = urllib2.Request(search_url)
+            response = opener.open(search_url,timeout=20).read()
             result = response.lower()
-            soup = BeautifulSoup(result)		
+            soup = BeautifulSoup(result)        
             qtdlegendas = result.count('span class="number number_')
-    		
+            
             if qtdlegendas > 0:
             
                 result =[]
-                log.info(" Resultado da busca: " + str(qtdlegendas) + " legenda(s)")
-                # Legenda com destaque	
+                #log.debug(" Resultado da busca: " + str(qtdlegendas) + " legenda(s)")
+                # Legenda com destaque    
                 for html in soup.findAll("div",{"class":"destaque"}):
                     a = html.find("a")
                     link = self.url + a.get("href")
@@ -397,9 +416,9 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                     user = html.find("p", "data").find("a").text
                     lang = html.find("img")["title"]
                     entry = {"Link": link, "Name": name, "Lang": self.Uconvert(lang)}
-                    log.debug(entry)				
+                    #log.debug(entry)                
                     if  langCode == self.Uconvert(lang):
-    				    result.append(entry)
+                        result.append(entry)
     
             
                 # Legenda sem destaque
@@ -410,16 +429,16 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                     user = html.find("p", "data").find("a").text
                     lang = html.find("img")["title"]
                     entry = {"Link": link, "Name": name, "Lang": self.Uconvert(lang)}
-                    log.debug(entry)
+                    #log.debug(entry)
                     if  langCode == self.Uconvert(lang):
-    				    result.append(entry)
-    				
-            		
-                qtd = len(result)	
+                        result.append(entry)
+                    
+                    
+                qtd = len(result)    
                 if qtd > 0:
                     for legendas in result:
-                        #log.debug(legendas["Name"])
-                        #log.debug(title.lower() + ' ' + year)                        
+                        ##log.debug(legendas["Name"])
+                        ##log.debug(title.lower() + ' ' + year)                        
                         if legendas["Name"].find(title.lower() + ' ' + year) >= 0 or legendas["Name"].find(title.lower()) >= 0 or legendas["Name"].find(title.lower().replace(' ','.') + ' ' + year) >= 0 or legendas["Name"].find(title.lower().replace(' ','.')) >= 0:
                             link = legendas["Link"]
                             regex = re.compile(self.url + '/download/(?P<id>[0-9a-zA-Z].*)/(?P<movie>.*)/(?P<movie2>.*)')
@@ -433,25 +452,27 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                                 else:
                                     log.error(" Nao foi possivel achar o ID da legenda")                                
                             except:
-            					log.error(" Erro ao tentar achar o ID da legenda")
+                                log.error(" Erro ao tentar achar o ID da legenda")
                         else:
-            				log.error(" Nao foi possivel achar a legenda nos resultados")
+                            log.error(" Nao foi possivel achar a legenda nos resultados")
                 else:
-                    log.error(" Nao foi possivel detectar legendas encontradas na pagina")
+                    log.debug(" Nao houve resultados para a busca desse episodio")
             else:
-                log.info(" Nao houve resultados para a busca desse episodio")
-			
+                log.debug(" Nao houve resultados para a busca desse episodio")
+            
         except IOError, e:
             if hasattr(e, 'code') and hasattr(e, 'reason'):
                 log.info(" Nao foi possivel pesquisar no LegendasTV. Erro: " + str(e.code) + " " +str(e.reason))
+        except:
+            log.info(" Nao foi possivel pesquisar no LegendasTV. Erro desconhecido")                 
         
         return sub1
-		
+        
     def LegendasTVSeries(self,file_original_path,tvshow, season, episode, teams, langs):
 
     # Initiating variables and languages.
         subtitles, sub1, sub2, sub3, PartialSubtitles = [], [], [], [], []
-		
+        
         if len(langs) > 1:
             langCode = '99'
         else:
@@ -469,6 +490,10 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
         if int(episode) < 10: ee = "0"+episode
         else: ee = episode
 
+        episode_a = int(episode)-1
+        if episode_a < 10: eea = "0"+str(episode_a)
+        else: eea = str(episode_a)
+
     # Setting up the search string; the original tvshow name is preferable.
     # If the tvshow name lenght is less than 3 characters, append the year to the search.
         source_web=''
@@ -477,62 +502,100 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
         if teams.find("hdtv") > 0 :
             source_hdtv = " HDTV"
         if teams.find("420p") > 0 :
-            resolution = " 420p"			
+            resolution = " 420p"            
         if teams.find("720p") > 0 :
             resolution = " 720p"
         if teams.find("1080p") > 0 :
             resolution = " 1080p"
         if teams.find("webdl") > 0 :
-            source_web = " WEB"				
+            source_web = " WEB"                
+
 
         search = tvshow + ' ' + 'S' + ss +'E' + ee
-        search_url = self.url +'/util/carrega_legendas_busca/termo:' +search.replace(' ','%20') + '/id_idioma:1'
-        log.debug(" Search URL: " + str(search_url))
+        search_url = self.url +'/util/carrega_legendas_busca/' +search.replace(' ','%20')+ '/1'
+        #log.debug(" Search URL (0): " + str(search_url))
         try:
-            request = urllib2.Request(search_url)
-            response = urllib2.urlopen(request,timeout=20).read()
+            #request = urllib2.Request(search_url)
+            response = opener.open(search_url,timeout=20).read()
             result = response.lower()
-			
-            soup = BeautifulSoup(result)		
+            
+            soup = BeautifulSoup(result)        
             qtdlegendas = result.count('span class="number number_')
-            #log.info(qtdlegendas)      
+            ##log.debug(qtdlegendas)      
 
             #f = open('/media/SAMSUNG/Divx/8- Arquivos HDTV/result.html', 'w')
             #f.write(result)
             #f.close()
 
             if qtdlegendas <= 0:
-                search = tvshow + ' ' + season +'x' + ee
-                search_url = self.url +'/util/carrega_legendas_busca/termo:' +search.replace(' ','%20') + '/id_idioma:1'
-                log.debug(" Search URL: " + str(search_url))
+                search = self.RemoveYear(tvshow) + ' ' + 'S' + ss +'E' + ee
+                search_url = self.url +'/util/carrega_legendas_busca/' +search.replace(' ','%20')+ '/1'
+                #log.debug(" Search URL (1): " + str(search_url))
                 try:
-                    request = urllib2.Request(search_url)
-                    response = urllib2.urlopen(request,timeout=20).read()
+                    #request = urllib2.Request(search_url)
+                    response = opener.open(search_url,timeout=20).read()
                     result = response.lower()
-        			
-                    soup = BeautifulSoup(result)		
+                    
+                    soup = BeautifulSoup(result)        
                     qtdlegendas = result.count('span class="number number_')
                 except IOError, e:
                     if hasattr(e, 'code') and hasattr(e, 'reason'):
                         log.info(" Nao foi possivel pesquisar no LegendasTV. Erro: " + str(e.code) + " " +str(e.reason))
-			    		
+                except e:
+                    log.info(e)
+                    log.info(" Nao foi possivel pesquisar no LegendasTV. Erro desconhecido")                          
+
+            if qtdlegendas <= 0:
+                search = self.RemoveYear(tvshow) + ' ' + 'S' + ss +'E' + eea +'E' + ee
+                search_url = self.url +'/util/carrega_legendas_busca/' +search.replace(' ','%20')+ '/1'
+                #log.debug(" Search URL (2): " + str(search_url))
+                try:
+                    #request = urllib2.Request(search_url)
+                    response = opener.open(search_url,timeout=20).read()
+                    result = response.lower()
+                    
+                    soup = BeautifulSoup(result)        
+                    qtdlegendas = result.count('span class="number number_')
+                except IOError, e:
+                    if hasattr(e, 'code') and hasattr(e, 'reason'):
+                        log.info(" Nao foi possivel pesquisar no LegendasTV. Erro: " + str(e.code) + " " +str(e.reason))
+                except:
+                    log.info(" Nao foi possivel pesquisar no LegendasTV. Erro desconhecido")
+
+            if qtdlegendas <= 0:
+                search = tvshow.replace("."," ").replace("_", " ") + ' ' + season +'x' + ee
+                search_url = self.url +'/util/carrega_legendas_busca/' +search.replace(' ','%20')+ '/1'
+                #log.debug(" Search URL (3): " + str(search_url))
+                try:
+                    #request = urllib2.Request(search_url)
+                    response = opener.open(search_url,timeout=20).read()
+                    result = response.lower()
+                    
+                    soup = BeautifulSoup(result)        
+                    qtdlegendas = result.count('span class="number number_')
+                except IOError, e:
+                    if hasattr(e, 'code') and hasattr(e, 'reason'):
+                        log.info(" Nao foi possivel pesquisar no LegendasTV. Erro: " + str(e.code) + " " +str(e.reason))
+                except:
+                    log.info(" Nao foi possivel pesquisar no LegendasTV. Erro desconhecido")                      
+                    
             if qtdlegendas > 0:
             
                 result =[]
-                log.info(" Resultado da busca: " + str(qtdlegendas) + " legenda(s)")
-                # Legenda com destaque	
+                #log.debug(" Resultado da busca: " + str(qtdlegendas) + " legenda(s)")
+                # Legenda sem destaque    
                 for html in soup.findAll("div",{"class":""}):
                     a = html.find("a")
                     link = a.get("href")
                     name = a.text
                     #user = html.find("p", "data").find("a").text
+                    data = int(html.find("p", "data").text[-18:][:10][-4:])
                     lang = html.find("img")["title"]
-                    #log.debug(lang)
                     entry = {"Link": link, "Name": name, "Lang": self.Uconvert(lang)}
-                    log.debug(entry)				
-                    if  langCode == self.Uconvert(lang):
-    				    log.info(" Legendas sem destaque:")					
-    				    result.append(entry)
+                    #log.debug(entry)                
+                    if  langCode == self.Uconvert(lang) and data >= int(date.today().year)-1:
+                        log.debug(" Legenda sem destaque encontrada")                    
+                        result.append(entry)
             
                 # PACK
                 for html in soup.findAll("div",{"class":"pack"}):
@@ -541,28 +604,28 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                     name = a.text
                     #user = html.find("p", "data").find("a").text
                     lang = html.find("img")["title"]
-                    #log.debug(lang)                    
+                    data = int(html.find("p", "data").text[-18:][:10][-4:])
                     entry = {"Link": link, "Name": name, "Lang": self.Uconvert(lang)}
-                    log.debug(entry)				
-                    if  langCode == self.Uconvert(lang):
-    				    log.info(" Legendas Pack:") 					
-    				    result.append(entry)
-						
-                # Legenda com destaque	
+                    #log.debug(entry)                
+                    if  langCode == self.Uconvert(lang) and data >= int(date.today().year)-1:
+                        log.debug(" Legenda Pack encontrada")                     
+                        result.append(entry)
+                        
+                # Legenda com destaque    
                 for html in soup.findAll("div",{"class":"destaque"}):
                     a = html.find("a")
                     link = a.get("href")
                     name = a.text
                     #user = html.find("p", "data").find("a").text
                     lang = html.find("img")["title"]
-                    #log.debug(lang)
+                    data = int(html.find("p", "data").text[-18:][:10][-4:])
                     entry = {"Link": link, "Name": name, "Lang": self.Uconvert(lang)}
-                    log.debug(entry)				
-                    if  langCode == self.Uconvert(lang):
-    				    log.info(" Legendas com destaque:")					
-    				    result.append(entry)						
-            		
-                qtd = len(result)        		
+                    #log.debug(entry)                
+                    if  langCode == self.Uconvert(lang) and data >= int(date.today().year)-1:
+                        log.debug(" Legenda com destaque encontrada")                    
+                        result.append(entry)                        
+                    
+                qtd = len(result)                
                 if len(result) > 0:
                     for legendas in result:
                         if legendas["Name"].find('s'+ss + 'e'+ee) >= 0 or legendas["Name"].find(season+'x'+ee) >= 0 :
@@ -578,18 +641,36 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                                 else:
                                     log.error(" Nao foi possivel achar o ID da legenda")                                
                             except:
-            					log.error(" Erro ao tentar achar o ID da legenda")
+                                log.error(" Erro ao tentar achar o ID da legenda")
+                        elif legendas["Name"].find('s'+ss + 'e' + eea + 'e'+ee) >= 0:
+                            link = legendas["Link"]
+                            regex = re.compile('/download/(?P<id>[0-9a-zA-Z].*)/(?P<tvshow>.*)/(?P<release>.*)')
+                            try: 
+                                id_match = regex.match(link)
+                                if id_match:
+                                    id = id_match.group(1)
+                                    SubtitleResult = {"release" : legendas["Name"], "lang" : 'pt-br', "link" : id, "page" : self.url}
+                                    sub1.append( SubtitleResult )
+                                    log.info(" Legenda " + str(legendas["Name"]) + " adicionada a fila do Periscope")
+                                else:
+                                    log.error(" Nao foi possivel achar o ID da legenda")                                
+                            except:
+                                log.error(" Erro ao tentar achar o ID da legenda")
                         else:
-            				log.error(" Nao foi possivel achar a legenda nos resultados")
+                            log.error(" Nao foi possivel achar a legenda nos resultados")
                 else:
-                    log.error(" Nao foi possivel detectar legendas encontradas na pagina")
+                    log.debug(" Nao houve resultados para a busca desse episodio")
             else:
-                log.info(" Nao houve resultados para a busca desse episodio")		
-			
+                log.debug(" Nao houve resultados para a busca desse episodio")        
+            
         except IOError, e:
             if hasattr(e, 'code') and hasattr(e, 'reason'):
                 log.info(" Nao foi possivel pesquisar no LegendasTV. Erro: " + str(e.code) + " " +str(e.reason))
-        
+            else:
+                log.info(" Nao foi possivel pesquisar no LegendasTV. Erro: ")
+        except Exception, err:
+            print Exception, err        
+            log.info(" Nao foi possivel pesquisar no LegendasTV. Erro desconhecido")                           
         return sub1
 
     def chomp(self,s):
@@ -612,7 +693,7 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
         for art in [ '2014', '2013', '2012', '2011', '2010', '2009', '2008', '2007', '2006', '2005', '2004' , '2003', '2002', '2001', '1999' ]:
             if re.search(art, s):
                 return re.sub(art, '', s)
-        return s		
+        return s        
 
     def shiftarticle(self,s):
         for art in [ 'The', 'O', 'A', 'Os', 'As', 'El', 'La', 'Los', 'Las', 'Les', 'Le' ]:
