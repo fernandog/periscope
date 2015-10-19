@@ -357,7 +357,9 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
         FirstMatch = ''
         SecondMatch = ''
         FileMatch = ''
-        MatchMode = ''
+        listSubtitles = [os.path.basename(x) for x in subtitleList]
+        log.info(" Quantidade de legendas encontradas: " + str(len(listSubtitles)))
+        log.debug(" Legendas encontradas: " + str(listSubtitles))
         for subtitle in subtitleList:
             subtitlefile = os.path.basename(subtitle)
             sub_clean = subtitlefile.lower().replace("web-dl", "webdl").replace("web.dl", "webdl").replace("web dl", "webdl").replace("web_dl", "webdl")
@@ -403,33 +405,31 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                             #FirstMatch = Team and resolution must be equal
                             if resolutionvideo.lower() == '1080p' and qualityvideo.lower() == qualitysrt.lower():
                                 #FirstMatch = Team different and resolution equal (1080p cases)
-                                #FirstMatch = subtitlename
-                                #There is the new 1080p.HDTV. Can promote anymore
                                 log.info(" Qualidade: Sim e Equipe: Nao (Renomear!) - " + str(subtitlefile))
                                 self.NMA(releaseFile.rsplit(".", 1)[0], subtitlefile.rsplit(".", 1)[0])
                             else:
                                 log.info(" Qualidade: Sim e Equipe: Nao - " + str(subtitlefile))
                         else:
                             # Team and Resolution different
-                            if 'major.crimes' in subtitlename.lower() or 'major crimes' in subtitlename.lower():
-                                FirstMatch = subtitlename
-                                log.info(" Qualidade: Nao e Equipe: Nao - Forcing download - " + str(subtitlefile))
+                            if resolutionvideo.lower() == '1080p' and resolutionsrt.lower() == '720p' and qualityvideo.lower() == qualitysrt.lower():
+                                SecondMatch = str(self.getFileName(subtitle))
+                                log.info(" Qualidade: Nao e Equipe: Nao - Promovendo 720p HDTV > 1080p - " + str(subtitlefile))
+                            if len(listSubtitles) == 1:
+                                SecondMatch = str(self.getFileName(subtitle))
+                                log.info(" Qualidade: Nao e Equipe: Nao - Single SRT file - " + str(subtitlefile))
                             else:
                                 log.info(" Qualidade: Nao e Equipe: Nao - " + str(subtitlefile))
-        #if len(FileMatch)+len(FirstMatch)+len(SecondMatch) > 1:
-            log.debug("FileMatch: " + str(FileMatch) + " FirstMatch: " + str(FirstMatch) + " SecondMatch: " + str(SecondMatch))
+        log.debug("FileMatch: " + str(FileMatch) + " FirstMatch: " + str(FirstMatch) + " SecondMatch: " + str(SecondMatch))
         if len(FileMatch) > 1:
             bestMatch = FileMatch
-            MatchMode = "File"
+            log.info(" ***** Arquivo exato: " + str(bestMatch) + " *****")
         else:
             if len(FirstMatch) > 1:
                 bestMatch = FirstMatch
-                MatchMode = "Equipe + Qualidade"
+                log.info(" Equipe + Qualidade: " + str(bestMatch))
             else:
                 bestMatch = SecondMatch
-                MatchMode = "Equipe (Qualidade promovida)"
-        if len(bestMatch) > 1:
-            log.info(" ***** Arquivo exato: " + str(bestMatch) + " *****")
+                log.info(" Qualidade promovida: " + str(bestMatch))
         return bestMatch
 
     def LegendasTVMovies(self, file_original_path, title, year, langs):
