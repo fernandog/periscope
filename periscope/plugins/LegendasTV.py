@@ -407,6 +407,10 @@ class LegendasTV(SubtitleDatabase.SubtitleDB):
                                 #FirstMatch = Team different and resolution equal (1080p cases)
                                 log.info(" Qualidade: Sim e Equipe: Nao (Renomear!) - " + str(subtitlefile))
                                 self.NMA(releaseFile.rsplit(".", 1)[0], subtitlefile.rsplit(".", 1)[0])
+                            if releasevideo.lower() in releasesrt.lower() or releasesrt.lower() in releasevideo.lower():
+                                #SecondMatch = Team is part of SRT Team like BTCHKEK (video) and BTCHKEK1 (subtitle)
+                                log.info(" Qualidade: Sim e Equipe: Sim(parcial) - " + str(subtitlefile))
+                                SecondMatch = str(self.getFileName(subtitle))
                             else:
                                 log.info(" Qualidade: Sim e Equipe: Nao - " + str(subtitlefile))
                         else:
